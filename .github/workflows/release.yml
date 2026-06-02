@@ -13,8 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write    # to create GitHub Release
-      id-token: write    # for npm provenance
+      contents: write
 
     steps:
       - name: Checkout
@@ -29,7 +28,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Verify tag matches package.json version
         run: |
@@ -49,17 +47,17 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+
       - name: Publish to npm
         run: pnpm publish --no-git-checks --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          # Try to extract this version's section from CHANGELOG.md; fall back to a 1-liner.
           NOTES_FILE="$(mktemp)"
           if [ -f CHANGELOG.md ]; then
             awk -v ver="${TAG#v}" '
