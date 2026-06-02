@@ -1,0 +1,64 @@
+{
+  "name": "@kieusonlam/wp-woocommerce",
+  "version": "0.3.0",
+  "description": "Product, Order, Customer, Item, Coupon models for WordPress + WooCommerce databases — read prices, stock, line items, billing/shipping addresses, and order history directly from MySQL in Node.js / TypeScript.",
+  "license": "MIT",
+  "author": "Lâm Kiều <rainbow.lam25@gmail.com>",
+  "homepage": "https://github.com/kieusonlam/wp-woocommerce#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kieusonlam/wp-woocommerce.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kieusonlam/wp-woocommerce/issues"
+  },
+  "keywords": [
+    "wordpress",
+    "woocommerce",
+    "headless",
+    "headless-wordpress",
+    "ecommerce",
+    "product",
+    "order",
+    "typescript",
+    "nodejs"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo",
+    "prepublishOnly": "pnpm run build"
+  },
+  "peerDependencies": {
+    "@kieusonlam/wp-core": "^0.3.0"
+  },
+  "dependencies": {
+    "sequelize": "^6.37.0"
+  },
+  "devDependencies": {
+    "@kieusonlam/wp-core": "^0.3.0",
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0",
+    "rimraf": "^6.0.1"
+  }
+}

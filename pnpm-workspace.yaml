@@ -1,0 +1,5 @@
+# Single-package config (no `packages:` field — this isn't a workspace,
+# we use this file only because pnpm 11 reads build-script allowlist from here).
+allowBuilds:
+  esbuild: true
+  sharp: true
