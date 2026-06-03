@@ -75,15 +75,17 @@ const count = await c?.orderCount();
 <a id="compatibility"></a>
 ## ⚠️ Compatibility note (WooCommerce HPOS)
 
-WooCommerce 8.x introduced **High-Performance Order Storage** which moves orders out of `wp_posts` into a separate `wp_wc_orders` table. This package targets the **legacy postmeta storage** (still the dominant deployment at time of writing).
+WooCommerce 8.x introduced **High-Performance Order Storage (HPOS)** which moves orders out of `wp_posts` into separate `wp_wc_orders*` tables.
 
-If your site has migrated to HPOS, products and customers still work, but `Order` queries return nothing. To check:
+- **`Order.findOrder(id)` / `Order.forCustomer(customerId)` (reads, v0.4.2+)** and **[`Order.createOrder()`](#-write-path) (writes, v0.4.1+)** **auto-detect** the storage mode and use legacy `wp_posts`/`postmeta` and/or HPOS `wc_orders*` accordingly (both when data-sync is on). → **HPOS works out of the box.**
+- The lower-level builder **`Order.query()…`** still targets **legacy postmeta only**. On an HPOS-only site (enabled `yes`, data-sync **off**) it returns nothing — use `findOrder` / `forCustomer` instead.
+
+Check your site's mode:
 
 ```sql
-SELECT option_value FROM wp_options
- WHERE option_name = 'woocommerce_custom_orders_table_enabled';
--- 'no' = legacy postmeta (this package works)
--- 'yes' = HPOS (orders won't be visible — disable HPOS or wait for a future release)
+SELECT option_name, option_value FROM wp_options
+ WHERE option_name IN ('woocommerce_custom_orders_table_enabled',           -- 'yes' = HPOS is the source of truth
+                       'woocommerce_custom_orders_table_data_sync_enabled'); -- 'yes' = both stores kept in sync
 ```
 
 ---
@@ -223,6 +225,17 @@ o.payment;         // Payment {...}
 // Line items
 const items = await o.items();
 // → Item[]
+```
+
+### HPOS-aware reads — `findOrder` / `forCustomer`
+
+`Order.query()` above reads **legacy postmeta** only. For code that must also work on **HPOS** sites, use these auto-detecting helpers — they return the same `Order` (all getters + `.items()`):
+
+```ts
+const order    = await Order.findOrder(1024);   // by id — legacy or HPOS, auto-detected
+const myOrders = await Order.forCustomer(42);   // a customer's orders, newest first
+
+await Order.findOrderHpos(1024);                // force an HPOS read (advanced / testing)
 ```
 
 ### Status scopes
@@ -494,7 +507,35 @@ await product.saveMeta('_stock_status', 'instock');
 await product.saveMeta('_product_image_gallery', '700,701,702');
 ```
 
-For Orders, wrap in a transaction:
+For **orders**, use the high-level helper `Order.createOrder()` — it writes the order + line items in one transaction and **auto-detects HPOS** (see the [HPOS note](#️-compatibility-note-woocommerce-hpos) above):
+
+```ts
+import { Order } from '@kieusonlam/wp-woocommerce';
+
+const order = await Order.createOrder({
+  lines: [
+    { productId: 14812, quantity: 2 },
+    { productId: 15105, quantity: 1 },
+  ],
+  billing: {
+    first_name: 'Khách', last_name: 'Mua',
+    phone: '0900000000', email: 'buyer@example.com',
+    address_1: '123 Đường ABC', city: 'TP.HCM', country: 'VN',
+  },
+  customerId: 42,         // 0 = guest
+  status: 'processing',   // default; pass without the `wc-` prefix
+  paymentMethod: 'cod',
+});
+
+console.log(order.ID);    // → new order id
+```
+
+Line prices come from each product's `_price`; currency / decimals / WooCommerce version are read from `wp_options`; the order key is generated automatically. Input types: `CreateOrderInput`, `OrderLineInput`, `OrderAddressInput`.
+
+> ⚠️ A direct DB insert does **not** run WooCommerce hooks → no confirmation emails, no stock reduction, and WC Analytics isn't updated until regenerated. Tax / shipping / coupons are written as `0`. Use the WC REST API if you need those handled automatically.
+
+<details>
+<summary>Low-level alternative — build the order by hand</summary>
 
 ```ts
 await conn.sequelize.transaction(async (t) => {
@@ -508,9 +549,11 @@ await conn.sequelize.transaction(async (t) => {
   await order.saveMeta('_order_currency', 'VND', { transaction: t });
   await order.saveMeta('_order_total', '1990000', { transaction: t });
   await order.saveMeta('_customer_user', '42', { transaction: t });
-  // ... add line items via Item.create()
+  // ... add line items into wp_woocommerce_order_items / _itemmeta
 });
 ```
+
+</details>
 
 ---
 

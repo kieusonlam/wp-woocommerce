@@ -6,6 +6,7 @@
 
 import {
   getConnection,
+  getModels,
   Post,
   type WpConnection,
   type MetaValue,
@@ -69,6 +70,117 @@ function generateOrderKey(): string {
 const addr = (a: OrderAddressInput, k: string): string =>
   (a as Record<string, string | undefined>)[k] ?? '';
 
+// ---- Đọc đơn auto-detect HPOS ----------------------------------------------
+
+const hposModeCache = new WeakMap<WpConnection, boolean>();
+
+/** Site có dùng HPOS làm nguồn chính không (`woocommerce_custom_orders_table_enabled='yes'`). */
+async function usesHpos(conn: WpConnection): Promise<boolean> {
+  const cached = hposModeCache.get(conn);
+  if (cached !== undefined) return cached;
+  let on = false;
+  try {
+    const rows = (await conn.sequelize.query(
+      `SELECT option_value v FROM ${conn.prefix}options WHERE option_name='woocommerce_custom_orders_table_enabled' LIMIT 1`,
+    ))[0] as Array<{ v: string }>;
+    on = rows[0]?.v === 'yes';
+  } catch {
+    on = false;
+  }
+  hposModeCache.set(conn, on);
+  return on;
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// HPOS lưu số dạng decimal(26,8) ('400.00000000'); postmeta lưu '400'. Chuẩn hóa
+// để Order.total… trả chuỗi giống legacy.
+const dec = (v: any): string => {
+  const n = parseFloat(String(v ?? '0'));
+  return Number.isFinite(n) ? String(n) : '0';
+};
+
+/** Map dữ liệu HPOS (wc_orders + addresses + operational_data + meta) → map meta kiểu postmeta. */
+function hposMetaMap(o: any, addresses: any[], op: any, extra: any[]): Record<string, MetaValue> {
+  const m: Record<string, MetaValue> = {
+    _order_currency: o.currency ?? '',
+    _order_total: dec(o.total_amount),
+    _order_tax: dec(o.tax_amount),
+    _customer_user: String(o.customer_id ?? 0),
+    _payment_method: o.payment_method ?? '',
+    _payment_method_title: o.payment_method_title ?? '',
+    _transaction_id: o.transaction_id ?? '',
+    _billing_email: o.billing_email ?? '',
+    _customer_ip_address: o.ip_address ?? '',
+    _customer_user_agent: o.user_agent ?? '',
+  };
+  if (op) {
+    m._order_key = op.order_key ?? '';
+    m._order_shipping = dec(op.shipping_total_amount);
+    m._order_shipping_tax = dec(op.shipping_tax_amount);
+    m._cart_discount = dec(op.discount_total_amount);
+    m._cart_discount_tax = dec(op.discount_tax_amount);
+    m._created_via = op.created_via ?? '';
+    m._order_version = op.woocommerce_version ?? '';
+    m._prices_include_tax = op.prices_include_tax ? 'yes' : 'no';
+    if (op.date_paid_gmt) m._paid_date = op.date_paid_gmt;
+  }
+  for (const a of addresses) {
+    const p = a.address_type === 'shipping' ? '_shipping_' : '_billing_';
+    m[`${p}first_name`] = a.first_name ?? '';
+    m[`${p}last_name`] = a.last_name ?? '';
+    m[`${p}company`] = a.company ?? '';
+    m[`${p}address_1`] = a.address_1 ?? '';
+    m[`${p}address_2`] = a.address_2 ?? '';
+    m[`${p}city`] = a.city ?? '';
+    m[`${p}state`] = a.state ?? '';
+    m[`${p}postcode`] = a.postcode ?? '';
+    m[`${p}country`] = a.country ?? '';
+    if (a.email) m[`${p}email`] = a.email;
+    m[`${p}phone`] = a.phone ?? '';
+  }
+  // Meta tùy chỉnh còn lại (vd _billing_address_index, attribution, is_vat_exempt…).
+  for (const e of extra) if (e?.meta_key) m[e.meta_key] = e.meta_value;
+  return m;
+}
+
+/** Dựng Order từ dữ liệu HPOS: Post "ảo" (in-memory) + metaCache → mọi getter chạy như legacy. */
+function hposToOrder(conn: WpConnection, o: any, meta: Record<string, MetaValue>): Order {
+  const { Post: PostModel } = getModels(conn) as any;
+  const raw = PostModel.build(
+    {
+      ID: o.id,
+      post_status: o.status,
+      post_type: 'shop_order',
+      post_title: `Order – ${o.date_created_gmt ?? ''}`,
+      post_date: o.date_created_gmt ?? '',
+      post_date_gmt: o.date_created_gmt ?? '',
+      post_modified: o.date_updated_gmt ?? o.date_created_gmt ?? '',
+      post_modified_gmt: o.date_updated_gmt ?? o.date_created_gmt ?? '',
+      post_author: Number(o.customer_id ?? 0),
+      post_excerpt: o.customer_note ?? '',
+      post_parent: Number(o.parent_order_id ?? 0),
+    },
+    { isNewRecord: false },
+  );
+  const order = new Order(raw, conn);
+  (order as unknown as { metaCache: Record<string, MetaValue> }).metaCache = meta;
+  return order;
+}
+
+/** Đọc 1 đơn từ bộ bảng HPOS (`wc_orders` + addresses + operational_data + meta). */
+async function loadHposOrder(conn: WpConnection, id: number): Promise<Order | null> {
+  const P = conn.prefix;
+  const seq = conn.sequelize;
+  const orows = (await seq.query(`SELECT * FROM ${P}wc_orders WHERE id=? AND type='shop_order' LIMIT 1`, { replacements: [id] }))[0] as any[];
+  const o = orows[0];
+  if (!o) return null;
+  const addrs = (await seq.query(`SELECT * FROM ${P}wc_order_addresses WHERE order_id=?`, { replacements: [id] }))[0] as any[];
+  const ops = (await seq.query(`SELECT * FROM ${P}wc_order_operational_data WHERE order_id=? LIMIT 1`, { replacements: [id] }))[0] as any[];
+  const metas = (await seq.query(`SELECT meta_key, meta_value FROM ${P}wc_orders_meta WHERE order_id=?`, { replacements: [id] }))[0] as any[];
+  return hposToOrder(conn, o, hposMetaMap(o, addrs, ops[0], metas));
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 export class Order extends Post {
   static override defaultType = 'shop_order';
 
@@ -130,6 +242,50 @@ export class Order extends Post {
   }
   static failed(connection?: WpConnection) {
     return Order.query(connection).where({ post_status: 'wc-failed' });
+  }
+
+  // ----- đọc đơn (auto-detect HPOS) ---------------------------------------
+
+  /**
+   * Tìm 1 đơn theo id — **tự phát hiện HPOS**:
+   *   - HPOS bật (`woocommerce_custom_orders_table_enabled='yes'`) → đọc từ `wc_orders*`.
+   *   - ngược lại → đọc legacy `wp_posts`/`postmeta` (kèm meta).
+   * Order trả về có đầy đủ getter (currency/total/billing/shipping/payment/…) + `.items()`.
+   *
+   * (`Order.query()` vẫn là đường legacy thuần postmeta — dùng method này khi cần
+   * an toàn với cả HPOS.)
+   */
+  static async findOrder(id: number, connection?: WpConnection): Promise<Order | null> {
+    const conn = connection ?? getConnection();
+    if (await usesHpos(conn)) return loadHposOrder(conn, id);
+    return Order.query(conn).where({ ID: id }).withMeta().first();
+  }
+
+  /** Đọc 1 đơn từ HPOS (ép kiểu, KHÔNG auto-detect) — cho site HPOS-only hoặc kiểm thử. */
+  static findOrderHpos(id: number, connection?: WpConnection): Promise<Order | null> {
+    return loadHposOrder(connection ?? getConnection(), id);
+  }
+
+  /**
+   * Đơn của một khách (mới nhất trước) — tự phát hiện HPOS.
+   * HPOS: lọc `wc_orders.customer_id`. Legacy: `hasMeta('_customer_user')`.
+   */
+  static async forCustomer(customerId: number, connection?: WpConnection): Promise<Order[]> {
+    const conn = connection ?? getConnection();
+    if (!customerId) return [];
+    if (await usesHpos(conn)) {
+      const ids = (await conn.sequelize.query(
+        `SELECT id FROM ${conn.prefix}wc_orders WHERE customer_id=? AND type='shop_order' ORDER BY date_created_gmt DESC`,
+        { replacements: [customerId] },
+      ))[0] as Array<{ id: number }>;
+      const out: Order[] = [];
+      for (const r of ids) {
+        const o = await loadHposOrder(conn, Number(r.id));
+        if (o) out.push(o);
+      }
+      return out;
+    }
+    return Order.query(conn).hasMeta('_customer_user', String(customerId)).withMeta().newest().all();
   }
 
   // ----- tạo đơn (ghi thẳng DB, auto-detect HPOS) -------------------------
