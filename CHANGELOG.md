@@ -1,5 +1,13 @@
 # @kieusonlam/wp-woocommerce
 
+## 0.4.0
+
+### Patch changes
+
+- Bumps `@kieusonlam/wp-core` peer dependency to `^0.4.0`. No code changes — release coordinated with wp-core 0.4.0 (adds `.whereIn()` / `.whereNotIn()` + `Op` re-export) to keep all 3 packages on the same minor version.
+
+  When upgrading: `pnpm add @kieusonlam/wp-core@^0.4.0 @kieusonlam/wp-woocommerce@^0.4.0` (same for npm/yarn).
+
 ## 0.3.0
 
 ### Patch changes

@@ -1,6 +1,6 @@
 {
   "name": "@kieusonlam/wp-woocommerce",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Product, Order, Customer, Item, Coupon models for WordPress + WooCommerce databases — read prices, stock, line items, billing/shipping addresses, and order history directly from MySQL in Node.js / TypeScript.",
   "license": "MIT",
   "author": "Lâm Kiều <rainbow.lam25@gmail.com>",
@@ -52,13 +52,13 @@
     "prepublishOnly": "pnpm run build"
   },
   "peerDependencies": {
-    "@kieusonlam/wp-core": "^0.3.0"
+    "@kieusonlam/wp-core": "^0.4.0"
   },
   "dependencies": {
     "sequelize": "^6.37.0"
   },
   "devDependencies": {
-    "@kieusonlam/wp-core": "^0.3.1",
+    "@kieusonlam/wp-core": "^0.4.0",
     "@types/node": "^22.10.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
