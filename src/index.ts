@@ -18,7 +18,12 @@
 
 export { Product } from './models/product.js';
 export { Variation } from './models/variation.js';
-export { Order } from './models/order.js';
+export {
+  Order,
+  type CreateOrderInput,
+  type OrderLineInput,
+  type OrderAddressInput,
+} from './models/order.js';
 export { Item } from './models/item.js';
 export { Customer } from './models/customer.js';
 export { Coupon } from './models/coupon.js';
