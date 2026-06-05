@@ -1,5 +1,13 @@
 # @kieusonlam/wp-woocommerce
 
+## 0.5.0
+
+### Minor changes
+
+- Bumps `@kieusonlam/wp-core` peer dependency to `^0.5.0`. No code changes — coordinated release with wp-core 0.5.0 (term-meta accessor on `Term`/`Taxonomy`) + wp-acf 0.5.0 (`acfTerm`) to keep all 3 packages on the same minor.
+
+  When upgrading: `pnpm add @kieusonlam/wp-core@^0.5.0 @kieusonlam/wp-woocommerce@^0.5.0`.
+
 ## 0.4.2
 
 ### Minor changes
